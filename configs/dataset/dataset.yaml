@@ -1,0 +1,6 @@
+dataset:
+  dataset_name: None
+  dataset_config_name: None
+  train_file: None
+  validation_file: None
+  validation_split_percentage: 5

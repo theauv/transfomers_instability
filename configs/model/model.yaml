@@ -1,0 +1,6 @@
+model_name_or_path: None
+config_name: None
+tokenizer_name: None
+use_slow_tokenizer: False
+model_type: None
+block_size: 128
