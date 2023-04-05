@@ -29,9 +29,10 @@ class Config:
     max_train_steps: Union[None, int] = None
     lr_scheduler_type: SchedulerType = "linear"
     num_warmup_steps: float = 10  # 5e3
-    checkpointing_steps: Union[None, str] = None
+    checkpointing_steps: Union[None, str, int] = "step"
     resume_from_checkpoint: Union[None, str] = None
     with_tracking: bool = True
     output_dir: str = "outputs"
     report_to: str = "wandb"
     seed = 0
+    spike_threshold = 10

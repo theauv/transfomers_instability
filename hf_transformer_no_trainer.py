@@ -25,6 +25,7 @@ from accelerate import Accelerator, DistributedType
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from config import Config
+import shutil
 
 logger = get_logger(__name__)
 
@@ -429,6 +430,8 @@ if __name__ == "__main__":
         model.train()
         if configs.with_tracking:
             total_loss = 0
+        batches = {}
+        spike_detected = False
         for step, batch in enumerate(train_dataloader):
             # We need to skip steps until we reach the resumed step
             if configs.resume_from_checkpoint and epoch == starting_epoch:
@@ -441,7 +444,7 @@ if __name__ == "__main__":
             with accelerator.accumulate(model):
                 outputs = model(**batch)
                 loss = outputs.loss
-                training_perplexity = math.exp(loss)
+                #training_perplexity = math.exp(loss) or here ??
                 # We keep track of the loss at each epoch
                 if configs.with_tracking:
                     total_loss += loss.detach().float()
@@ -463,28 +466,59 @@ if __name__ == "__main__":
                     accelerator.save_state(output_dir)
             if completed_steps >= MAX_TRAIN_STEPS:
                 break
+            
+            #Compute train_loss and train_perplexity
+            train_loss = total_loss.item() / step if step>0 else total_loss.item()
+            training_perplexity = math.exp(train_loss) #Not sure ????
 
-            if (step - 1) % 100 == 0 and configs.with_tracking:
-                print((step - 1) % 100)
-                train_loss = total_loss.item() / step
+            #Is there a spike
+            if step%100!=0:
+                print("#####SPIKE_DETECTED#####")
+                if (train_loss - previous_train_loss)/previous_train_loss > configs.spike_threshold:
+                    spike_detected = True
+
+            #Update previous_train_loss
+            previous_train_loss = train_loss
+
+            #Log every 100 steps
+            if step % 100 == 0 and step > 0 and configs.with_tracking:
                 logger.info(
-                    f"epoch {epoch} step {step}: perplexity: {training_perplexity} training_loss: {train_loss}"
+                    f"epoch {epoch} step {step}: training_perplexity: {training_perplexity} training_loss: {train_loss}\n"
+                    f"Spike detected: {spike_detected}"
                 )
                 accelerator.log(
                     {
                         "training_perplexity": training_perplexity,
-                        "train_loss": train_loss,  # len(train_dataloader),
+                        "train_loss": train_loss,
                         "epoch": epoch,
                         "step": completed_steps,
+                        "spike":  int(spike_detected),
                     },
                     step=completed_steps,
                 )
-                # Add save batch and weights model here (overwrite if no spike)
+
+            #Local checkpoint every 100 steps
             if configs.checkpointing_steps == "step":
-                output_dir = f"epoch_{epoch}"
-                if configs.output_dir is not None:
-                    output_dir = os.path.join(configs.output_dir, output_dir)
-                accelerator.save_state(output_dir)
+                if batches:
+                    batches = {key:torch.cat((value, batch[key]), axis=0) for key, value in batches.items()}
+                else:
+                    batches = batch
+
+                if step % 100 == 0 and step>0:
+                    #If spikes during the 100 last steps,
+                    # save the model and the batches of the last 100 steps into a new checkpoint
+                    if spike_detected:
+                        output_dir = f"step_{step}"
+                        if configs.output_dir is not None:
+                            output_dir = os.path.join(configs.output_dir, output_dir)
+                        accelerator.save_state(output_dir)
+                        for key, value in batches.items():
+                            output_name = f"{output_dir}/{str(key)}.pt"
+                            torch.save(value, output_name)
+
+                    #Reset no_spike
+                    spike_detected = False
+
 
         model.eval()
         losses = []
@@ -502,18 +536,25 @@ if __name__ == "__main__":
         losses = torch.cat(losses)
         try:
             eval_loss = torch.mean(losses)
-            perplexity = math.exp(eval_loss)
+            eval_perplexity = math.exp(eval_loss)
         except OverflowError:
-            perplexity = float("inf")
+            eval_perplexity = float("inf")
 
-        logger.info(f"epoch {epoch}: perplexity: {perplexity} eval_loss: {eval_loss}")
+        train_loss = total_loss.item() / len(train_dataloader)
+        training_perplexity = math.exp(train_loss) #Like that ???
+
+        logger.info(
+            f"epoch {epoch}: eval_perplexity: {eval_perplexity} eval_loss: {eval_loss}"
+            f"train_loss: {train_loss} training_perplexity: {training_perplexity}"
+        )
 
         if configs.with_tracking:
             accelerator.log(
                 {
-                    "perplexity": perplexity,
+                    "eval_perplexity": eval_perplexity,
                     "eval_loss": eval_loss,
-                    "train_loss": total_loss.item() / len(train_dataloader),
+                    "train_loss": train_loss,
+                    "training_perplexity": training_perplexity,
                     "epoch": epoch,
                     "step": completed_steps,
                 },
