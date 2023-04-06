@@ -4,6 +4,7 @@ from transformers import AutoModelForCausalLM, AutoConfig
 import yaml
 import os
 from config_dataclass import Config
+from typing import Dict
 
 
 def print_gpu_utilization():
@@ -18,7 +19,7 @@ def print_summary(result):
     print(f"Samples/second: {result.metrics['train_samples_per_second']:.2f}")
     print_gpu_utilization()
 
-def convert_yaml_configs(configs_directory_path="configs"):
+def convert_yaml_configs(overrides: Dict={}, configs_directory_path="configs"):
 
     configs = {}
     for filename in os.listdir(configs_directory_path):
@@ -26,6 +27,8 @@ def convert_yaml_configs(configs_directory_path="configs"):
         with open(f, "r") as file:
             config = yaml.load(file, Loader=yaml.FullLoader)
         configs.update(config)
+    configs.update(overrides)
+    
 
     config_dataclass = Config(**configs)
 

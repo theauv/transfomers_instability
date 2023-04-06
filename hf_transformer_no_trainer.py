@@ -6,6 +6,7 @@ import json
 import shutil
 from itertools import chain
 from tqdm.auto import tqdm
+import numpy as np
 from datasets import load_dataset
 import datasets
 import transformers
@@ -24,57 +25,49 @@ from accelerate import Accelerator, DistributedType
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from utils import convert_yaml_configs
+from config_dataclass import Config
+
+
 logger = get_logger(__name__)
 
 
-def compute_metrics(pred):
-    labels = pred.label_ids
-    preds = pred.predictions.argmax(-1)
-    precision, recall, f1, _ = precision_recall_fscore_support(
-        labels, preds, average="binary"
-    )
-    acc = accuracy_score(labels, preds)
-    return {"accuracy": acc, "f1": f1, "precision": precision, "recall": recall}
+def main(configs: Config):
+    def tokenize_function(examples):
+        return tokenizer(examples[text_column_name])
 
+    def group_texts(examples):
+        """Main data processing function that will concatenate
+        all texts from our dataset and generate chunks of block_size.
+        Args:
+            examples (str): text to process
 
-def tokenize_function(examples):
-    return tokenizer(examples[text_column_name])
+        Returns:
+            str: processed text
+        """
+        # Concatenate all texts.
+        concatenated_examples = {k: list(chain(*examples[k])) for k in examples.keys()}
+        total_length = len(concatenated_examples[list(examples.keys())[0]])
+        # We drop the small remainder, we could add padding if the model supported it instead of this drop, you can
+        # customize this part to your needs.
+        if total_length >= block_size:
+            total_length = (total_length // block_size) * block_size
+        # Split by chunks of max_len.
+        result = {
+            k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
+            for k, t in concatenated_examples.items()
+        }
+        result["labels"] = result["input_ids"].copy()
+        return result
 
+    # Rename the run
+    repo = git.Repo(search_parent_directories=True)
+    sha = repo.head.object.hexsha
 
-def group_texts(examples):
-    """Main data processing function that will concatenate
-    all texts from our dataset and generate chunks of block_size.
-    Args:
-        examples (str): text to process
+    configs.run_name = f"{configs.run_name}_{sha}"
 
-    Returns:
-        str: processed text
-    """
-    # Concatenate all texts.
-    concatenated_examples = {k: list(chain(*examples[k])) for k in examples.keys()}
-    total_length = len(concatenated_examples[list(examples.keys())[0]])
-    # We drop the small remainder, we could add padding if the model supported it instead of this drop, you can
-    # customize this part to your needs.
-    if total_length >= block_size:
-        total_length = (total_length // block_size) * block_size
-    # Split by chunks of max_len.
-    result = {
-        k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
-        for k, t in concatenated_examples.items()
-    }
-    result["labels"] = result["input_ids"].copy()
-    return result
-
-if __name__ == "__main__":
-
-    # Better way: hydra+config files
-    configs = convert_yaml_configs(configs_directory_path="configs")
-
-    # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
-    # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
-    # in the environment
     accelerator_log_kwconfigs = {}
 
+    # Initialize the accelerator. We will let the accelerator handle device placement for us.
     if configs.with_tracking:
         accelerator_log_kwconfigs["log_with"] = configs.report_to
         accelerator_log_kwconfigs["logging_dir"] = configs.output_dir
@@ -105,22 +98,23 @@ if __name__ == "__main__":
     # Handle the repository creation
     # if accelerator.is_main_process and configs.output_dir is not None:
     #     os.makedirs(configs.output_dir, exist_ok=True)
+    if configs.output_dir is not None:
+        new_output_dir = os.path.join(configs.output_dir, f"{configs.run_name}")
+        os.mkdir(new_output_dir)
+        configs.output_dir = new_output_dir
     accelerator.wait_for_everyone()
 
     # Download/Reload the dataset
-    train_dataset_location = os.path.join(configs.data_location, configs.train_data_location)
-    test_dataset_location = os.path.join(configs.data_location, configs.test_data_location)
-    if (
-        Path(train_dataset_location).is_file()
-        and Path(test_dataset_location).is_file()
-    ):
+    train_dataset_location = os.path.join(
+        configs.data_location, configs.train_data_location
+    )
+    test_dataset_location = os.path.join(
+        configs.data_location, configs.test_data_location
+    )
+    if Path(train_dataset_location).is_file() and Path(test_dataset_location).is_file():
         # Reload the dataset saved in local files
-        train_set = load_dataset("json", data_files=train_dataset_location)[
-            "train"
-        ]
-        test_set = load_dataset("json", data_files=test_dataset_location)[
-            "train"
-        ]
+        train_set = load_dataset("json", data_files=train_dataset_location)["train"]
+        test_set = load_dataset("json", data_files=test_dataset_location)["train"]
 
         if configs.tokenizer_name:
             tokenizer = AutoTokenizer.from_pretrained(
@@ -257,12 +251,6 @@ if __name__ == "__main__":
     embedding_size = model.get_input_embeddings().weight.shape[0]
     if tokenizer_length > embedding_size:
         model.resize_token_embeddings(tokenizer_length)
-
-    # Name of the run
-    repo = git.Repo(search_parent_directories=True)
-    sha = repo.head.object.hexsha
-
-    configs.run_name = f"{configs.run_name}_{sha}"
 
     # Log a few random samples from the training set:
     # for index in random.sample(range(len(train_set)), 3):
@@ -447,7 +435,7 @@ if __name__ == "__main__":
             with accelerator.accumulate(model):
                 outputs = model(**batch)
                 loss = outputs.loss
-                #training_perplexity = math.exp(loss) or here ??
+                # training_perplexity = math.exp(loss) or here ??
                 # We keep track of the loss at each epoch
                 if configs.with_tracking:
                     total_loss += loss.detach().float()
@@ -461,7 +449,7 @@ if __name__ == "__main__":
                 progress_bar.update(1)
                 completed_steps += 1
 
-            #Not supported for now
+            # Not supported for now
             # if isinstance(checkpointing_steps, int):
             #     if completed_steps % checkpointing_steps == 0:
             #         output_dir = f"step_{completed_steps }"
@@ -470,21 +458,23 @@ if __name__ == "__main__":
             #         accelerator.save_state(output_dir)
             # if completed_steps >= MAX_TRAIN_STEPS:
             #     break
-            
-            #Compute train_loss and train_perplexity
-            train_loss = total_loss.item() / step if step>0 else total_loss.item()
-            training_perplexity = math.exp(train_loss) #Not sure ????
 
-            #Is there a spike
-            if step%100!=0:
-                if (train_loss - previous_train_loss)/previous_train_loss > configs.spike_threshold:
+            # Compute train_loss and train_perplexity
+            train_loss = total_loss.item() / step if step > 0 else total_loss.item()
+            training_perplexity = math.exp(train_loss)  # Not sure ????
+
+            # Is there a spike
+            if step % 100 != 0:
+                if (
+                    train_loss - previous_train_loss
+                ) / previous_train_loss > configs.spike_threshold:
                     spike_detected = True
                     print("\n#####SPIKE_DETECTED#####")
 
-            #Update previous_train_loss
+            # Update previous_train_loss
             previous_train_loss = train_loss
 
-            #Log every 100 steps
+            # Log every 100 steps
             if step % 100 == 0 and step > 0 and configs.with_tracking:
                 logger.info(
                     f"epoch {epoch} step {step}: training_perplexity: {training_perplexity} training_loss: {train_loss}\n"
@@ -496,26 +486,31 @@ if __name__ == "__main__":
                         "train_loss": train_loss,
                         "epoch": epoch,
                         "step": completed_steps,
-                        "spike":  int(spike_detected),
+                        "spike": int(spike_detected),
                     },
                     step=completed_steps,
                 )
 
-            #Local checkpoint every 100 steps
+            # Local checkpoint every 100 steps
             if configs.checkpointing_steps == "step":
                 if batches:
-                    batches = {key:torch.cat((value, batch[key]), axis=0) for key, value in batches.items()}
+                    batches = {
+                        key: torch.cat((value, batch[key]), axis=0)
+                        for key, value in batches.items()
+                    }
                 else:
                     batches = batch
 
                 if step % 100 == 0:
-                    #If spikes during the 100 last steps,
+                    # If spikes during the 100 last steps,
                     # save the model and the batches of the last 100 steps into a new checkpoint
-                    if step>0:
+                    if step > 0:
                         if spike_detected:
                             output_dir = f"step_{step}"
                             if configs.output_dir is not None:
-                                output_dir = os.path.join(configs.output_dir, output_dir)
+                                output_dir = os.path.join(
+                                    configs.output_dir, output_dir
+                                )
                             accelerator.save_state(output_dir)
                             for key, value in batches.items():
                                 output_name = f"{output_dir}/{str(key)}.pt"
@@ -528,9 +523,8 @@ if __name__ == "__main__":
                         output_dir = os.path.join(configs.output_dir, output_dir)
                     accelerator.save_state(output_dir)
 
-                    #Reset no_spike
+                    # Reset no_spike
                     spike_detected = False
-
 
         model.eval()
         losses = []
@@ -553,7 +547,7 @@ if __name__ == "__main__":
             eval_perplexity = float("inf")
 
         train_loss = total_loss.item() / len(train_dataloader)
-        training_perplexity = math.exp(train_loss) #Like that ???
+        training_perplexity = math.exp(train_loss)  # Like that ???
 
         logger.info(
             f"epoch {epoch}: eval_perplexity: {eval_perplexity} eval_loss: {eval_loss}"
@@ -593,4 +587,22 @@ if __name__ == "__main__":
         if accelerator.is_main_process:
             tokenizer.save_pretrained(configs.output_dir)
             with open(os.path.join(configs.output_dir, "all_results.json"), "w") as f:
-                json.dump({"eval_perplexity": eval_perplexity, "training_perplexity": training_perplexity}, f)
+                json.dump(
+                    {
+                        "eval_perplexity": eval_perplexity,
+                        "training_perplexity": training_perplexity,
+                    },
+                    f,
+                )
+
+
+if __name__ == "__main__":
+    learning_rates = np.logspace(-8, -1, 8)
+    for learning_rate in learning_rates:
+        configs = convert_yaml_configs(
+            overrides={
+                "learning_rate": learning_rate,
+                "run_name": f"LR_{learning_rate}",
+            }
+        )
+        main(configs)
