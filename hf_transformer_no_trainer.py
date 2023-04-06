@@ -1,5 +1,4 @@
 from pathlib import Path
-import random
 import math
 import logging
 import os
@@ -13,7 +12,6 @@ from transformers import (
     AutoTokenizer,
     AutoConfig,
     AutoModelForCausalLM,
-    GPT2Config,
     default_data_collator,
     get_scheduler,
 )
@@ -24,9 +22,9 @@ from torch.utils.data import DataLoader
 from accelerate import Accelerator, DistributedType
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
-from config import Config
-import shutil
-
+from config_dataclass import Config
+import hydra
+from utils import convert_yaml_configs
 logger = get_logger(__name__)
 
 
@@ -68,10 +66,10 @@ def group_texts(examples):
     result["labels"] = result["input_ids"].copy()
     return result
 
-
 if __name__ == "__main__":
+
     # Better way: hydra+config files
-    configs = Config()
+    configs = convert_yaml_configs(configs_directory_path="configs")
 
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
@@ -111,15 +109,17 @@ if __name__ == "__main__":
     accelerator.wait_for_everyone()
 
     # Download/Reload the dataset
+    train_dataset_location = os.path.join(configs.data_location, configs.train_data_location)
+    test_dataset_location = os.path.join(configs.data_location, configs.test_data_location)
     if (
-        Path(configs.train_dataset_location).is_file()
-        and Path(configs.test_dataset_location).is_file()
+        Path(train_dataset_location).is_file()
+        and Path(test_dataset_location).is_file()
     ):
         # Reload the dataset saved in local files
-        train_set = load_dataset("json", data_files=configs.train_dataset_location)[
+        train_set = load_dataset("json", data_files=train_dataset_location)[
             "train"
         ]
-        test_set = load_dataset("json", data_files=configs.test_dataset_location)[
+        test_set = load_dataset("json", data_files=test_dataset_location)[
             "train"
         ]
 
@@ -236,9 +236,9 @@ if __name__ == "__main__":
 
         # Split and save the datasets
         train_set = lm_datasets["train"].shuffle(seed=configs.seed)
-        train_set.to_json(configs.train_dataset_location)
+        train_set.to_json(train_dataset_location)
         test_set = lm_datasets["validation"].shuffle(seed=configs.seed)
-        test_set.to_json(configs.test_dataset_location)
+        test_set.to_json(test_dataset_location)
 
     # Load a HuggingFace pretrained causal language model
     # configuration = RobertaConfig()
@@ -246,8 +246,12 @@ if __name__ == "__main__":
     # model_config = GPT2Config()
     # model = AutoModelForCausalLM.from_config(model_config)
 
-    if configs.model_name:
-        # Always from scratch for the moment (no need pretrained for now)
+    if configs.model_name and configs.pretrained_model:
+        logger.info("Training a pretrained model")
+        model = AutoModelForCausalLM.from_pretrained(
+            configs.model_name,
+        )
+    else:
         logger.info("Training new model from scratch")
         model = AutoModelForCausalLM.from_config(config)
 
@@ -262,8 +266,8 @@ if __name__ == "__main__":
     configs.run_name = f"{configs.run_name}_{sha}"
 
     # Log a few random samples from the training set:
-    for index in random.sample(range(len(train_set)), 3):
-        logger.info(f"Sample {index} of the training set: {train_set[index]}.")
+    # for index in random.sample(range(len(train_set)), 3):
+    #     logger.info(f"Sample {index} of the training set: {train_set[index]}.")
 
     # DataLoaders creation:
     train_dataloader = DataLoader(
@@ -473,9 +477,9 @@ if __name__ == "__main__":
 
             #Is there a spike
             if step%100!=0:
-                print("#####SPIKE_DETECTED#####")
                 if (train_loss - previous_train_loss)/previous_train_loss > configs.spike_threshold:
                     spike_detected = True
+                    print("\n#####SPIKE_DETECTED#####")
 
             #Update previous_train_loss
             previous_train_loss = train_loss

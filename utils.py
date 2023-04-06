@@ -1,7 +1,9 @@
 from pynvml import *
 import torch
 from transformers import AutoModelForCausalLM, AutoConfig
-from config import Config
+import yaml
+import os
+from config_dataclass import Config
 
 
 def print_gpu_utilization():
@@ -15,6 +17,20 @@ def print_summary(result):
     print(f"Time: {result.metrics['train_runtime']:.2f}")
     print(f"Samples/second: {result.metrics['train_samples_per_second']:.2f}")
     print_gpu_utilization()
+
+def convert_yaml_configs(configs_directory_path="configs"):
+
+    configs = {}
+    for filename in os.listdir(configs_directory_path):
+        f = os.path.join(configs_directory_path, filename)
+        with open(f, "r") as file:
+            config = yaml.load(file, Loader=yaml.FullLoader)
+        configs.update(config)
+
+    config_dataclass = Config(**configs)
+
+    return config_dataclass
+
 
 
 if __name__ == "__main__":
