@@ -17,7 +17,7 @@ conda create --name transformers_instability --file requirements.txt
 
 1. Change the parameters
 
-In the config.py, you can change the values of the parameters (batch size, learning rate, ...)
+In the configs directory, you can change the values of the parameters (batch size, learning rate, ...) in the different yaml config files
 
 2. Run the main pipeline
 
@@ -28,6 +28,7 @@ It basically:
 - Instantiate a tokenizer
 - Preprocess the dataset
 - Train the model
+- local checkpoint if there are spikes
 
 You can access the logs and charts in "wandb".
 
