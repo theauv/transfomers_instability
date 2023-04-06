@@ -3,6 +3,7 @@ import math
 import logging
 import os
 import json
+import shutil
 from itertools import chain
 from tqdm.auto import tqdm
 from datasets import load_dataset
@@ -22,8 +23,6 @@ from torch.utils.data import DataLoader
 from accelerate import Accelerator, DistributedType
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
-from config_dataclass import Config
-import hydra
 from utils import convert_yaml_configs
 logger = get_logger(__name__)
 
@@ -104,8 +103,8 @@ if __name__ == "__main__":
         set_seed(configs.seed)
 
     # Handle the repository creation
-    if accelerator.is_main_process and configs.output_dir is not None:
-        os.makedirs(configs.output_dir, exist_ok=True)
+    # if accelerator.is_main_process and configs.output_dir is not None:
+    #     os.makedirs(configs.output_dir, exist_ok=True)
     accelerator.wait_for_everyone()
 
     # Download/Reload the dataset
@@ -462,14 +461,15 @@ if __name__ == "__main__":
                 progress_bar.update(1)
                 completed_steps += 1
 
-            if isinstance(checkpointing_steps, int):
-                if completed_steps % checkpointing_steps == 0:
-                    output_dir = f"step_{completed_steps }"
-                    if configs.output_dir is not None:
-                        output_dir = os.path.join(configs.output_dir, output_dir)
-                    accelerator.save_state(output_dir)
-            if completed_steps >= MAX_TRAIN_STEPS:
-                break
+            #Not supported for now
+            # if isinstance(checkpointing_steps, int):
+            #     if completed_steps % checkpointing_steps == 0:
+            #         output_dir = f"step_{completed_steps }"
+            #         if configs.output_dir is not None:
+            #             output_dir = os.path.join(configs.output_dir, output_dir)
+            #         accelerator.save_state(output_dir)
+            # if completed_steps >= MAX_TRAIN_STEPS:
+            #     break
             
             #Compute train_loss and train_perplexity
             train_loss = total_loss.item() / step if step>0 else total_loss.item()
@@ -508,17 +508,25 @@ if __name__ == "__main__":
                 else:
                     batches = batch
 
-                if step % 100 == 0 and step>0:
+                if step % 100 == 0:
                     #If spikes during the 100 last steps,
                     # save the model and the batches of the last 100 steps into a new checkpoint
-                    if spike_detected:
-                        output_dir = f"step_{step}"
-                        if configs.output_dir is not None:
-                            output_dir = os.path.join(configs.output_dir, output_dir)
-                        accelerator.save_state(output_dir)
-                        for key, value in batches.items():
-                            output_name = f"{output_dir}/{str(key)}.pt"
-                            torch.save(value, output_name)
+                    if step>0:
+                        if spike_detected:
+                            output_dir = f"step_{step}"
+                            if configs.output_dir is not None:
+                                output_dir = os.path.join(configs.output_dir, output_dir)
+                            accelerator.save_state(output_dir)
+                            for key, value in batches.items():
+                                output_name = f"{output_dir}/{str(key)}.pt"
+                                torch.save(value, output_name)
+                        else:
+                            shutil.rmtree(output_dir)
+
+                    output_dir = f"step_{step}"
+                    if configs.output_dir is not None:
+                        output_dir = os.path.join(configs.output_dir, output_dir)
+                    accelerator.save_state(output_dir)
 
                     #Reset no_spike
                     spike_detected = False
@@ -585,4 +593,4 @@ if __name__ == "__main__":
         if accelerator.is_main_process:
             tokenizer.save_pretrained(configs.output_dir)
             with open(os.path.join(configs.output_dir, "all_results.json"), "w") as f:
-                json.dump({"perplexity": perplexity}, f)
+                json.dump({"eval_perplexity": eval_perplexity, "training_perplexity": training_perplexity}, f)
