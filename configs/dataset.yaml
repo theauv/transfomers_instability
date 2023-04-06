@@ -1,0 +1,9 @@
+data_location: /home/theau/transformers_instability/data_and_tokenizers/data
+train_data_location: train/train_data.json
+test_data_location: valid/test_data.json
+dataset_name: wikitext
+dataset_config_name: wikitext-2-raw-v1
+validation_split_percentage: 0.8
+tokenizer_name: null
+use_slow_tokenizer: False
+block_size: 128 #null
