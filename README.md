@@ -36,7 +36,5 @@ You can access the logs and charts in "wandb".
 
 - Train to reach better perplexity
 - Increase batch_size without memory exceeded
-- Detect the spikes
-- Save model and batch when spike
-- Grid search with different learning rates
+- Grid search with different learning rates (issues with VM when vs code disconnected)
 - smaller model ?
