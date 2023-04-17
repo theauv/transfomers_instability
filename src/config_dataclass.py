@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import Union
+from dataclasses import dataclass, field
+from typing import Union, List
 from transformers import SchedulerType
 
 # YOU DONT NEED TO MODIFY THS, HAVE A LOOK AT THE CONFIGS YAML FILES
@@ -42,3 +42,5 @@ class Config:
     debug_set: bool = False
     train_debug_set_location: str = "train/train_debug_set.json"
     test_debug_set_location: str = "valid/test_debug_set.json"
+    additional_tags: Union[List, None] = field(default_factory=lambda: [])
+    mixed_precision: str = "fp16"

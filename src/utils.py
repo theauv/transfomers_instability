@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 from typing import Dict
 from pynvml import *
+import random
 from tqdm.auto import tqdm
 import yaml
 import git
@@ -369,7 +370,7 @@ def train(
             #     break
 
             # Compute train_loss and train_perplexity
-            train_loss = total_loss.item() / (step+1)
+            train_loss = loss.detach().float() #total_loss.item()/(step + 1)
             training_perplexity = math.exp(train_loss)  # Not sure ????
 
             # Is there a spike
@@ -384,7 +385,8 @@ def train(
             previous_train_loss = train_loss
 
             # Log every 100 steps
-            if step % 100 == 0 and step > 0 and with_tracking:
+            # if step % 100 == 0 and step > 0 and with_tracking:
+            if with_tracking:
                 logger.info(
                     f"epoch {epoch} step {step}: training_perplexity: {training_perplexity} training_loss: {train_loss}\n"
                     f"Spike detected: {spike_detected}"
@@ -409,7 +411,7 @@ def train(
                     }
                 else:
                     batches = batch
-                
+
                 if step % 100 == 0 and config_output_dir is not None:
                     # If spikes during the 100 last steps,
                     # save the model and the batches of the last 100 steps into a new checkpoint
@@ -521,7 +523,7 @@ def set_up_run(
 
     accelerator = Accelerator(
         gradient_accumulation_steps=configs.gradient_accumulation_steps,
-        mixed_precision="fp16",
+        mixed_precision=configs.mixed_precision,
         **accelerator_log_kwconfigs,
     )
 
@@ -544,8 +546,6 @@ def set_up_run(
         set_seed(configs.seed)
 
     # Handle the repository creation
-    # if accelerator.is_main_process and configs.output_dir is not None:
-    #     os.makedirs(configs.output_dir, exist_ok=True)
     if configs.output_dir is not None:
         new_output_dir = os.path.join(configs.output_dir, f"{configs.run_name}")
         os.mkdir(new_output_dir)
@@ -553,10 +553,6 @@ def set_up_run(
     accelerator.wait_for_everyone()
 
     # Load a HuggingFace pretrained causal language model
-    # configuration = RobertaConfig()
-    # model = RobertaModel(configuration)
-    # model_config = GPT2Config()
-    # model = AutoModelForCausalLM.from_config(model_config)
 
     if configs.model_name and configs.pretrained_model:
         logger.info("Training a pretrained model")
@@ -641,6 +637,9 @@ def set_up_run(
         model, optimizer, train_dataloader, eval_dataloader, lr_scheduler
     )
 
+    if configs.resume_from_checkpoint is not None:
+        accelerator.load_state(configs.resume_from_checkpoint)
+
     # On TPU, the tie weights in our model have been disconnected, so we need to restore the ties.
     if accelerator.distributed_type == DistributedType.TPU:
         model.tie_weights()
@@ -665,12 +664,14 @@ def set_up_run(
         experiment_config = vars(configs)
         # TensorBoard cannot log Enums, need the raw value
         # experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"].value
+
         init_kwargs = (
             {
                 "wandb": {
-                    "group": f"{group_name}_{configs.model_name}_pretrained_{configs.pretrained_model}_{configs.dataset_name}_subset_{configs.debug_set}",
+                    "group": f"{group_name}_{sha}",
                     "name": configs.run_name,
                     "settings": {"console": "off"},
+                    "tags": configs.additional_tags,
                 }
             }
             if group_name is not None

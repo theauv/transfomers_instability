@@ -2,9 +2,9 @@ project_name: transformers_instability_no_trainer
 run_name: ""
 overwrite_cache: False
 checkpointing_steps: step
-resume_from_checkpoint: null
 with_tracking: True
-output_dir: outputs
+output_dir: null #checkpoints
 report_to: wandb
 seed: 0
 spike_threshold: 10
+additional_tags: null
