@@ -369,14 +369,14 @@ def train(
             #     break
 
             # Compute train_loss and train_perplexity
-            train_loss = total_loss.item() / step if step > 0 else total_loss.item()
+            train_loss = total_loss.item() / (step+1)
             training_perplexity = math.exp(train_loss)  # Not sure ????
 
             # Is there a spike
             if step % 100 != 0:
                 if (
                     train_loss - previous_train_loss
-                ) / previous_train_loss > spike_threshold:
+                ) / previous_train_loss > spike_threshold or math.isnan(train_loss):
                     spike_detected = True
                     logger.info("\n#####SPIKE_DETECTED#####")
 
@@ -409,7 +409,7 @@ def train(
                     }
                 else:
                     batches = batch
-
+                
                 if step % 100 == 0 and config_output_dir is not None:
                     # If spikes during the 100 last steps,
                     # save the model and the batches of the last 100 steps into a new checkpoint
@@ -450,9 +450,6 @@ def train(
             eval_perplexity = math.exp(eval_loss)
         except OverflowError:
             eval_perplexity = float("inf")
-
-        train_loss = total_loss.item() / len(train_dataloader)
-        training_perplexity = math.exp(train_loss)  # Like that ???
 
         logger.info(
             f"epoch {epoch}: eval_perplexity: {eval_perplexity} eval_loss: {eval_loss}"
@@ -524,6 +521,7 @@ def set_up_run(
 
     accelerator = Accelerator(
         gradient_accumulation_steps=configs.gradient_accumulation_steps,
+        mixed_precision="fp16",
         **accelerator_log_kwconfigs,
     )
 

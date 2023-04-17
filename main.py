@@ -8,6 +8,7 @@ from src.utils import convert_yaml_configs, load_dataset_for_training, train, se
 logger = get_logger(__name__)
 os.environ['WANDB_START_METHOD'] = 'thread'
 
+#If you want to override some parts of the config from the command line (used by bash script)
 parser = argparse.ArgumentParser(description="Finetune a transformers model on a causal language modeling task")
 parser.add_argument(
     "--lr",
@@ -56,6 +57,7 @@ train_set, test_set, tokenizer_length, model_config = load_dataset_for_training(
     seed=configs.seed,
 )
 
+#Set up the different elements required for the training and the API (wandb)
 (
     accelerator,
     train_dataloader,
@@ -74,6 +76,7 @@ train_set, test_set, tokenizer_length, model_config = load_dataset_for_training(
     tokenizer_length=tokenizer_length,
 )
 
+#Train the model
 train(
     logger=logger,
     accelerator=accelerator,
