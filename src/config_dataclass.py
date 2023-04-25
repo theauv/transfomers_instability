@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Union, List
+from typing import Union, List, Dict
 from transformers import SchedulerType
 
 # YOU DONT NEED TO MODIFY THS, HAVE A LOOK AT THE CONFIGS YAML FILES
@@ -44,3 +44,4 @@ class Config:
     test_debug_set_location: str = "valid/test_debug_set.json"
     additional_tags: Union[List, None] = field(default_factory=lambda: [])
     mixed_precision: str = "fp16"
+    model_config_overwrite: Dict = field(default_factory=lambda: {})

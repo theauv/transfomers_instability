@@ -103,14 +103,23 @@ def load_dataset_for_training(
         return result
 
     # Download/Reload the dataset
+    data_location = os.path.join(data_location, Path(f"data_{dataset_name}_{dataset_config_name}"))
+
     if debug_set:
         train_dataset_location = os.path.join(data_location, train_debug_set_location)
         test_dataset_location = os.path.join(data_location, test_debug_set_location)
     else:
         train_dataset_location = os.path.join(data_location, train_data_location)
         test_dataset_location = os.path.join(data_location, test_data_location)
+
+    print("##########")
+    print(train_dataset_location)
+
     if Path(train_dataset_location).is_file() and Path(test_dataset_location).is_file():
         # Reload the dataset saved in local files
+
+        print("##########")
+        print("YES")
 
         train_set = load_dataset("json", data_files=train_dataset_location)["train"]
         test_set = load_dataset("json", data_files=test_dataset_location)["train"]
@@ -139,6 +148,8 @@ def load_dataset_for_training(
             raise ValueError("No valid model name or config_name")
 
     else:
+        print("##########")
+        print("NO")
         # Downloading and loading a dataset from the hub.
         if dataset_name is not None:
             if debug_set:
@@ -236,6 +247,10 @@ def load_dataset_for_training(
         )
 
         # Split and save the datasets
+        if not Path(data_location).is_dir():
+            os.makedirs(f"{data_location}/train")
+            os.makedirs(f"{data_location}/valid")
+
         train_set = lm_datasets["train"].shuffle(seed=seed)
         train_set.to_json(train_dataset_location)
         test_set = lm_datasets["validation"].shuffle(seed=seed)
@@ -370,7 +385,7 @@ def train(
             #     break
 
             # Compute train_loss and train_perplexity
-            train_loss = loss.detach().float() #total_loss.item()/(step + 1)
+            train_loss = loss.detach().float()  # total_loss.item()/(step + 1)
             training_perplexity = math.exp(train_loss)  # Not sure ????
 
             # Is there a spike
@@ -506,7 +521,7 @@ def train(
 
 
 def set_up_run(
-    logger, group_name, model_config, configs, train_set, test_set, tokenizer_length
+    logger, group_name, model_config, configs: Config, train_set, test_set, tokenizer_length
 ):
     # Rename the run
     repo = git.Repo(search_parent_directories=True)
@@ -552,16 +567,22 @@ def set_up_run(
         configs.output_dir = new_output_dir
     accelerator.wait_for_everyone()
 
-    # Load a HuggingFace pretrained causal language model
+    # Rewrite the model_config
+    #model_config.update(configs.model_config_overwrite)
+
+    # Load a HuggingFace (pretrained) causal language model
 
     if configs.model_name and configs.pretrained_model:
         logger.info("Training a pretrained model")
         model = AutoModelForCausalLM.from_pretrained(
             configs.model_name,
+            config=model_config,
         )
     else:
         logger.info("Training new model from scratch")
-        model = AutoModelForCausalLM.from_config(model_config)
+        model = AutoModelForCausalLM.from_config(
+            model_config,
+        )
 
     embedding_size = model.get_input_embeddings().weight.shape[0]
     if tokenizer_length > embedding_size:
