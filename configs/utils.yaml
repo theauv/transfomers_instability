@@ -1,7 +1,7 @@
 project_name: transformers_instability_no_trainer
-run_name: ""
+run_name: "openwebtext"
 overwrite_cache: False
-checkpointing_steps: step
+checkpointing_steps: 100
 with_tracking: True
 output_dir: null #checkpoints
 report_to: wandb

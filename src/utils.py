@@ -6,12 +6,10 @@ from pathlib import Path
 import shutil
 from typing import Dict
 from pynvml import *
-import random
 from tqdm.auto import tqdm
 import yaml
 import git
 import torch
-import wandb
 from accelerate import Accelerator, DistributedType
 from accelerate.utils import set_seed
 from datasets import load_dataset
@@ -76,7 +74,7 @@ def load_dataset_for_training(
     seed,
 ):
     def tokenize_function(examples):
-        return tokenizer(examples[text_column_name])
+        return tokenizer(examples[text_column_name], max_length=1024, truncation=True)
 
     def group_texts(examples):
         """Main data processing function that will concatenate
@@ -112,14 +110,10 @@ def load_dataset_for_training(
         train_dataset_location = os.path.join(data_location, train_data_location)
         test_dataset_location = os.path.join(data_location, test_data_location)
 
-    print("##########")
-    print(train_dataset_location)
-
-    if Path(train_dataset_location).is_file() and Path(test_dataset_location).is_file():
+    if Path(train_dataset_location).is_file() and Path(test_dataset_location).is_file() and False:
         # Reload the dataset saved in local files
 
-        print("##########")
-        print("YES")
+        print("#####LOADING FROM SAVED DATASET#####")
 
         train_set = load_dataset("json", data_files=train_dataset_location)["train"]
         test_set = load_dataset("json", data_files=test_dataset_location)["train"]
@@ -148,10 +142,15 @@ def load_dataset_for_training(
             raise ValueError("No valid model name or config_name")
 
     else:
-        print("##########")
-        print("NO")
+        print("#####DOWNLOADING FROM THE HUB#####")
         # Downloading and loading a dataset from the hub.
-        if dataset_name is not None:
+        if dataset_name == "openwebtext":
+            dataset = load_dataset(dataset_name)
+            # owt by default only contains the 'train' split, so create a test split
+            raw_datasets = dataset["train"].train_test_split(test_size=validation_split_percentage/100, seed=seed, shuffle=True)
+            raw_datasets["validation"] = raw_datasets.pop('test') # rename the test split to val
+
+        elif dataset_name is not None:
             if debug_set:
                 raw_datasets = load_dataset(dataset_name, dataset_config_name)
                 raw_datasets["validation"] = load_dataset(
@@ -246,19 +245,15 @@ def load_dataset_for_training(
             desc=f"Grouping texts in chunks of {block_size}",
         )
 
-        # Split and save the datasets
-        if not Path(data_location).is_dir():
-            os.makedirs(f"{data_location}/train")
-            os.makedirs(f"{data_location}/valid")
+        # # Split and save the datasets
+        # if not Path(data_location).is_dir():
+        #     os.makedirs(f"{data_location}/train")
+        #     os.makedirs(f"{data_location}/valid")
 
         train_set = lm_datasets["train"].shuffle(seed=seed)
-        train_set.to_json(train_dataset_location)
+        # train_set.to_json(train_dataset_location)
         test_set = lm_datasets["validation"].shuffle(seed=seed)
-        test_set.to_json(test_dataset_location)
-
-    print(train_set)
-    print(test_set)
-    print(tokenizer_length)
+        # test_set.to_json(test_dataset_location)
 
     return train_set, test_set, tokenizer_length, model_config
 
@@ -389,7 +384,7 @@ def train(
             training_perplexity = math.exp(train_loss)  # Not sure ????
 
             # Is there a spike
-            if step % 100 != 0:
+            if step % checkpointing_steps != 0:
                 if (
                     train_loss - previous_train_loss
                 ) / previous_train_loss > spike_threshold or math.isnan(train_loss):
@@ -417,39 +412,85 @@ def train(
                     step=completed_steps,
                 )
 
-            # Local checkpoint every 100 steps
-            if checkpointing_steps == "step":
+            # Local checkpoint every checkpointing_steps steps
+            if isinstance(checkpointing_steps, int):
                 if batches:
                     batches = {
                         key: torch.cat((value, batch[key]), axis=0)
                         for key, value in batches.items()
                     }
                 else:
-                    batches = batch
+                    batches = batch                    
 
-                if step % 100 == 0 and config_output_dir is not None:
-                    # If spikes during the 100 last steps,
-                    # save the model and the batches of the last 100 steps into a new checkpoint
-                    if step > 0:
-                        if spike_detected:
-                            output_dir = f"step_{step-100}"
-                            if config_output_dir is not None:
-                                output_dir = os.path.join(config_output_dir, output_dir)
-                            accelerator.save_state(output_dir)
-                            for key, value in batches.items():
-                                output_name = f"{output_dir}/{str(key)}.pt"
-                                torch.save(value, output_name)
-                        else:
-                            shutil.rmtree(output_dir)
+                if step % checkpointing_steps == 0:
 
-                    output_dir = f"step_{step}"
                     if config_output_dir is not None:
-                        output_dir = os.path.join(config_output_dir, output_dir)
-                    accelerator.save_state(output_dir)
+                        # If spikes during the checkpointing_steps last steps,
+                        # save the model and the batches of the last checkpointing_steps steps into a new checkpoint
+                        if step > 0:
+                            if spike_detected:
+                                output_dir = f"step_{step-checkpointing_steps}"
+                                if config_output_dir is not None:
+                                    output_dir = os.path.join(config_output_dir, output_dir)
+                                accelerator.save_state(output_dir)
+                                for key, value in batches.items():
+                                    output_name = f"{output_dir}/{str(key)}.pt"
+                                    torch.save(value, output_name)
+                            else:
+                                shutil.rmtree(output_dir)
 
-                    # Reset no_spike
-                    spike_detected = False
+                        output_dir = f"step_{step}"
+                        if config_output_dir is not None:
+                            output_dir = os.path.join(config_output_dir, output_dir)
+                        accelerator.save_state(output_dir)
 
+                        # Reset no_spike
+                        spike_detected = False
+
+                    #Partial evaluation after "checkpoint_steps" training steps
+                    model.eval()
+                    losses = []
+                    print("train_dataloader length", len(train_dataloader))
+                    max_eval_steps = 10 #HARD CODED FOR NOW
+                    for step, batch in enumerate(eval_dataloader):
+                        if step == max_eval_steps:
+                            break
+
+                        with torch.no_grad():
+                            outputs = model(**batch)
+
+                        loss = outputs.loss
+                        losses.append(
+                            accelerator.gather_for_metrics(loss.repeat(per_device_eval_batch_size))
+                        )
+
+                    losses = torch.cat(losses)
+                    try:
+                        eval_loss = torch.mean(losses)
+                        eval_perplexity = math.exp(eval_loss)
+                    except OverflowError:
+                        eval_perplexity = float("inf")
+
+                    logger.info(
+                        f"epoch {epoch}: eval_perplexity: {eval_perplexity} eval_loss: {eval_loss}"
+                        f"train_loss: {train_loss} training_perplexity: {training_perplexity}"
+                    )
+
+                    if with_tracking:
+                        accelerator.log(
+                            {
+                                "eval_perplexity": eval_perplexity,
+                                "eval_loss": eval_loss,
+                                "train_loss": train_loss,
+                                "training_perplexity": training_perplexity,
+                                "epoch": epoch,
+                                "step": completed_steps,
+                            },
+                            step=completed_steps,
+                        )
+
+
+        #Full evaluation after each epoch
         model.eval()
         losses = []
         for step, batch in enumerate(eval_dataloader):
@@ -675,9 +716,9 @@ def set_up_run(
     NUM_TRAIN_EPOCHS = math.ceil(MAX_TRAIN_STEPS / num_update_steps_per_epoch)
 
     # Figure out how many steps we should save the Accelerator states
-    checkpointing_steps = configs.checkpointing_steps
-    if checkpointing_steps is not None and checkpointing_steps.isdigit():
-        checkpointing_steps = int(checkpointing_steps)
+    # checkpointing_steps = configs.checkpointing_steps
+    # if checkpointing_steps is not None and checkpointing_steps.isdigit():
+    #     checkpointing_steps = int(checkpointing_steps)
 
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
