@@ -668,7 +668,7 @@ def set_up_run(
         },
     ]
     optimizer = torch.optim.AdamW(
-        optimizer_grouped_parameters, lr=configs.learning_rate
+        optimizer_grouped_parameters, lr=configs.learning_rate, betas=(configs.beta_1, configs.beta_2)
     )
 
     # Scheduler and math around the number of training steps.

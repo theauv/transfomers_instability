@@ -2,8 +2,8 @@ model_name: distilgpt2 # distilgpt2 | gpt2
 model_config_name: null
 pretrained_model: False
 resume_from_checkpoint: null
-model_config_overwrite:
-  attn_pdrop: 0.1
-  bos_token_id: 50256
-  embd_pdrop: 0.1
-  resid_pdrop: 0.1
+# model_config_overwrite: NO USED FOR NOW
+#   attn_pdrop: 0.1
+#   bos_token_id: 50256
+#   embd_pdrop: 0.1
+#   resid_pdrop: 0.1

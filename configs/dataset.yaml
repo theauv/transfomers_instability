@@ -1,8 +1,8 @@
 data_location: /home/theau/transformers_instability/data_and_tokenizers
 train_data_location: train/train_data.json
 test_data_location: valid/test_data.json
-dataset_name: openwebtext # wikitext | openwebtext
-dataset_config_name: plain_text # wikitext-103-raw-v1 | plain_text
+dataset_name: wikitext # wikitext | openwebtext
+dataset_config_name: wikitext-103-raw-v1 # wikitext-103-raw-v1 | plain_text
 validation_split_percentage: 10 # percentage of full dataset for validation set
 tokenizer_name: null
 use_slow_tokenizer: False

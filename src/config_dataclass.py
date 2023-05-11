@@ -45,3 +45,5 @@ class Config:
     additional_tags: Union[List, None] = field(default_factory=lambda: [])
     mixed_precision: str = "fp16"
     model_config_overwrite: Dict = field(default_factory=lambda: {})
+    beta_1: float = 0.9
+    beta_2: float = 0.999

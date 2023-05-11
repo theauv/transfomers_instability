@@ -1,5 +1,5 @@
 project_name: transformers_instability_no_trainer
-run_name: "openwebtext"
+run_name: wikitext_poor_model
 overwrite_cache: False
 checkpointing_steps: 100
 with_tracking: True
