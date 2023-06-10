@@ -1,6 +1,6 @@
 model_name: distilgpt2 # distilgpt2 | gpt2
 model_config_name: null
-pretrained_model: False
+pretrained_model: false
 resume_from_checkpoint: null
 # model_config_overwrite: NO USED FOR NOW
 #   attn_pdrop: 0.1

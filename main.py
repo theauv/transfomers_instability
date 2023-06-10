@@ -4,12 +4,14 @@ from accelerate.logging import get_logger
 from src.utils import convert_yaml_configs, load_dataset_for_training, train, set_up_run
 
 
-#Instanciate the logger
+# Instanciate the logger
 logger = get_logger(__name__)
-os.environ['WANDB_START_METHOD'] = 'thread'
+os.environ["WANDB_START_METHOD"] = "thread"
 
-#If you want to override some parts of the config from the command line (used by bash script)
-parser = argparse.ArgumentParser(description="Finetune a transformers model on a causal language modeling task")
+# If you want to override some parts of the config from the command line (used by bash script)
+parser = argparse.ArgumentParser(
+    description="Finetune a transformers model on a causal language modeling task"
+)
 parser.add_argument(
     "--lr",
     type=float,
@@ -25,14 +27,18 @@ parser.add_argument(
 args = parser.parse_args()
 
 
-#Get the configs
+# Get the configs
 configs = convert_yaml_configs()
-configs = convert_yaml_configs(
-    overrides={
-        "learning_rate": args.lr,
-        "run_name": f"LR_{args.lr}",
-    }
-) if args.lr is not None else  convert_yaml_configs()
+configs = (
+    convert_yaml_configs(
+        overrides={
+            "learning_rate": args.lr,
+            "run_name": f"LR_{args.lr}",
+        }
+    )
+    if args.lr is not None
+    else convert_yaml_configs()
+)
 
 # Load the dataset:
 train_set, test_set, tokenizer_length, model_config = load_dataset_for_training(
@@ -56,7 +62,7 @@ train_set, test_set, tokenizer_length, model_config = load_dataset_for_training(
     seed=configs.seed,
 )
 
-#Set up the different elements required for the training and the API (wandb)
+# Set up the different elements required for the training and the API (wandb)
 (
     accelerator,
     train_dataloader,
@@ -75,7 +81,7 @@ train_set, test_set, tokenizer_length, model_config = load_dataset_for_training(
     tokenizer_length=tokenizer_length,
 )
 
-#Train the model
+# Train the model
 train(
     logger=logger,
     accelerator=accelerator,

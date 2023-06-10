@@ -101,159 +101,122 @@ def load_dataset_for_training(
         return result
 
     # Download/Reload the dataset
-    data_location = os.path.join(data_location, Path(f"data_{dataset_name}_{dataset_config_name}"))
+    data_location = os.path.join(
+        data_location, Path(f"data_{dataset_name}_{dataset_config_name}")
+    )
 
-    if debug_set:
-        train_dataset_location = os.path.join(data_location, train_debug_set_location)
-        test_dataset_location = os.path.join(data_location, test_debug_set_location)
-    else:
-        train_dataset_location = os.path.join(data_location, train_data_location)
-        test_dataset_location = os.path.join(data_location, test_data_location)
 
-    if Path(train_dataset_location).is_file() and Path(test_dataset_location).is_file() and False:
-        # Reload the dataset saved in local files
+    print("#####DOWNLOADING FROM THE HUB#####")
+    # Downloading and loading a dataset from the hub.
+    if dataset_name == "openwebtext":
+        dataset = load_dataset(dataset_name)
+        # owt by default only contains the 'train' split, so create a test split
+        raw_datasets = dataset["train"].train_test_split(
+            test_size=validation_split_percentage / 100, seed=seed, shuffle=True
+        )
+        raw_datasets["validation"] = raw_datasets.pop(
+            "test"
+        )  # rename the test split to val
 
-        print("#####LOADING FROM SAVED DATASET#####")
-
-        train_set = load_dataset("json", data_files=train_dataset_location)["train"]
-        test_set = load_dataset("json", data_files=test_dataset_location)["train"]
-
-        if tokenizer_name:
-            tokenizer = AutoTokenizer.from_pretrained(
-                tokenizer_name, use_fast=not use_slow_tokenizer
+    elif dataset_name is not None:
+        if debug_set:
+            raw_datasets = load_dataset(dataset_name, dataset_config_name)
+            raw_datasets["validation"] = load_dataset(
+                dataset_name,
+                dataset_config_name,
+                split="train[:100]",
             )
-        elif model_name:
-            tokenizer = AutoTokenizer.from_pretrained(
-                model_name, use_fast=not use_slow_tokenizer
+            raw_datasets["train"] = load_dataset(
+                dataset_name,
+                dataset_config_name,
+                split="train[100:1000]",
             )
         else:
-            raise ValueError(
-                "You are instantiating a new tokenizer from scratch. This is not supported by this script."
-            )
-
-        tokenizer_length = len(tokenizer)
-
-        # Initialize the model_config
-        if model_config_name:
-            model_config = AutoConfig.from_pretrained(model_config_name)
-        elif model_name:
-            model_config = AutoConfig.from_pretrained(model_name)
-        else:
-            raise ValueError("No valid model name or config_name")
-
-    else:
-        print("#####DOWNLOADING FROM THE HUB#####")
-        # Downloading and loading a dataset from the hub.
-        if dataset_name == "openwebtext":
-            dataset = load_dataset(dataset_name)
-            # owt by default only contains the 'train' split, so create a test split
-            raw_datasets = dataset["train"].train_test_split(test_size=validation_split_percentage/100, seed=seed, shuffle=True)
-            raw_datasets["validation"] = raw_datasets.pop('test') # rename the test split to val
-
-        elif dataset_name is not None:
-            if debug_set:
-                raw_datasets = load_dataset(dataset_name, dataset_config_name)
+            raw_datasets = load_dataset(dataset_name, dataset_config_name)
+            if "validation" not in raw_datasets.keys():
                 raw_datasets["validation"] = load_dataset(
                     dataset_name,
                     dataset_config_name,
-                    split="train[:100]",
+                    split=f"train[:{validation_split_percentage}%]",
                 )
                 raw_datasets["train"] = load_dataset(
                     dataset_name,
                     dataset_config_name,
-                    split="train[100:1000]",
+                    split=f"train[{validation_split_percentage}%:]",
                 )
-            else:
-                raw_datasets = load_dataset(dataset_name, dataset_config_name)
-                if "validation" not in raw_datasets.keys():
-                    raw_datasets["validation"] = load_dataset(
-                        dataset_name,
-                        dataset_config_name,
-                        split=f"train[:{validation_split_percentage}%]",
-                    )
-                    raw_datasets["train"] = load_dataset(
-                        dataset_name,
-                        dataset_config_name,
-                        split=f"train[{validation_split_percentage}%:]",
-                    )
-        else:
-            raise ValueError(
-                "Need either a dataset name or a training/validation file."
-            )
-
-        # Initialize the tokenizer
-        if tokenizer_name:
-            tokenizer = AutoTokenizer.from_pretrained(
-                tokenizer_name, use_fast=not use_slow_tokenizer
-            )
-        elif model_name:
-            tokenizer = AutoTokenizer.from_pretrained(
-                model_name, use_fast=not use_slow_tokenizer
-            )
-        else:
-            raise ValueError(
-                "You are instantiating a new tokenizer from scratch. This is not supported by this script."
-            )
-
-        tokenizer_length = len(tokenizer)
-
-        # Initialize the model_config
-        if model_config_name:
-            model_config = AutoConfig.from_pretrained(model_config_name)
-        elif model_name:
-            model_config = AutoConfig.from_pretrained(model_name)
-        else:
-            raise ValueError("No valid model name or config_name")
-
-        # Tokenize the dataset
-        column_names = raw_datasets["train"].column_names
-        text_column_name = "text" if "text" in column_names else column_names[0]
-
-        tokenized_datasets = raw_datasets.map(
-            tokenize_function,
-            batched=True,
-            num_proc=preprocessing_num_workers,
-            remove_columns=column_names,
-            load_from_cache_file=not overwrite_cache,
-            desc="Running tokenizer on dataset",
+    else:
+        raise ValueError(
+            "Need either a dataset name or a training/validation file."
         )
 
-        # Define the block size
-        if block_size is None:
-            block_size = tokenizer.model_max_length
-            if block_size > 1024:
-                logger.warning(
-                    "The chosen tokenizer supports a `model_max_length` that is longer than the default `block_size` value"
-                    " of 1024. If you would like to use a longer `block_size` up to `tokenizer.model_max_length` you can"
-                    " override this default in the config file."
-                )
-            block_size = 1024
-        else:
-            if block_size > tokenizer.model_max_length:
-                logger.warning(
-                    f"The block_size passed ({block_size}) is larger than the maximum length for the model"
-                    f"({tokenizer.model_max_length}). Using block_size={tokenizer.model_max_length}."
-                )
-            block_size = min(block_size, tokenizer.model_max_length)
-
-        # Preprocess the tokenized dataset
-        lm_datasets = tokenized_datasets.map(
-            group_texts,
-            batched=True,
-            num_proc=preprocessing_num_workers,
-            load_from_cache_file=not overwrite_cache,
-            desc=f"Grouping texts in chunks of {block_size}",
+    # Initialize the tokenizer
+    if tokenizer_name:
+        tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_name, use_fast=not use_slow_tokenizer
+        )
+    elif model_name:
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name, use_fast=not use_slow_tokenizer
+        )
+    else:
+        raise ValueError(
+            "You are instantiating a new tokenizer from scratch. This is not supported by this script."
         )
 
-        # # Split and save the datasets
-        # if not Path(data_location).is_dir():
-        #     os.makedirs(f"{data_location}/train")
-        #     os.makedirs(f"{data_location}/valid")
+    tokenizer_length = len(tokenizer)
 
-        train_set = lm_datasets["train"].shuffle(seed=seed)
-        # train_set.to_json(train_dataset_location)
-        test_set = lm_datasets["validation"].shuffle(seed=seed)
-        # test_set.to_json(test_dataset_location)
+    # Initialize the model_config
+    if model_config_name:
+        model_config = AutoConfig.from_pretrained(model_config_name)
+    elif model_name:
+        model_config = AutoConfig.from_pretrained(model_name)
+    else:
+        raise ValueError("No valid model name or config_name")
+
+    # Tokenize the dataset
+    column_names = raw_datasets["train"].column_names
+    text_column_name = "text" if "text" in column_names else column_names[0]
+
+    tokenized_datasets = raw_datasets.map(
+        tokenize_function,
+        batched=True,
+        num_proc=preprocessing_num_workers,
+        remove_columns=column_names,
+        load_from_cache_file=not overwrite_cache,
+        desc="Running tokenizer on dataset",
+    )
+
+    # Define the block size
+    if block_size is None:
+        block_size = tokenizer.model_max_length
+        if block_size > 1024:
+            logger.warning(
+                "The chosen tokenizer supports a `model_max_length` that is longer than the default `block_size` value"
+                " of 1024. If you would like to use a longer `block_size` up to `tokenizer.model_max_length` you can"
+                " override this default in the config file.",
+                main_process_only=False,
+            )
+        block_size = 1024
+    else:
+        if block_size > tokenizer.model_max_length:
+            logger.warning(
+                f"The block_size passed ({block_size}) is larger than the maximum length for the model"
+                f"({tokenizer.model_max_length}). Using block_size={tokenizer.model_max_length}.",
+                main_process_only=False,
+            )
+        block_size = min(block_size, tokenizer.model_max_length)
+
+    # Preprocess the tokenized dataset
+    lm_datasets = tokenized_datasets.map(
+        group_texts,
+        batched=True,
+        num_proc=preprocessing_num_workers,
+        load_from_cache_file=not overwrite_cache,
+        desc=f"Grouping texts in chunks of {block_size}",
+    )
+
+    train_set = lm_datasets["train"].shuffle(seed=seed)
+    test_set = lm_datasets["validation"].shuffle(seed=seed)
 
     return train_set, test_set, tokenizer_length, model_config
 
@@ -286,17 +249,24 @@ def train(
         * gradient_accumulation_steps
     )
 
-    logger.info("***** Running training *****")
-    logger.info(f"  Num examples = {len(train_set)}")
-    logger.info(f"  Num Epochs = {num_train_epochs}")
+    logger.info("***** Running training *****", main_process_only=False)
+    logger.info(f"  Num examples = {len(train_set)}", main_process_only=False)
+    logger.info(f"  Num Epochs = {num_train_epochs}", main_process_only=False)
     logger.info(
-        f"  Instantaneous batch size per device = {per_device_train_batch_size}"
+        f"  Instantaneous batch size per device = {per_device_train_batch_size}",
+        main_process_only=False,
     )
     logger.info(
-        f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}"
+        f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}",
+        main_process_only=False,
     )
-    logger.info(f"  Gradient Accumulation steps = {gradient_accumulation_steps}")
-    logger.info(f"  Total optimization steps = {max_train_steps}")
+    logger.info(
+        f"  Gradient Accumulation steps = {gradient_accumulation_steps}",
+        main_process_only=False,
+    )
+    logger.info(
+        f"  Total optimization steps = {max_train_steps}", main_process_only=False
+    )
     # Only show the progress bar once on each machine.
     progress_bar = tqdm(
         range(max_train_steps), disable=not accelerator.is_local_main_process
@@ -389,7 +359,7 @@ def train(
                     train_loss - previous_train_loss
                 ) / previous_train_loss > spike_threshold or math.isnan(train_loss):
                     spike_detected = True
-                    logger.info("\n#####SPIKE_DETECTED#####")
+                    logger.info("\n#####SPIKE_DETECTED#####", main_process_only=False)
 
             # Update previous_train_loss
             previous_train_loss = train_loss
@@ -399,7 +369,8 @@ def train(
             if with_tracking:
                 logger.info(
                     f"epoch {epoch} step {step}: training_perplexity: {training_perplexity} training_loss: {train_loss}\n"
-                    f"Spike detected: {spike_detected}"
+                    f"Spike detected: {spike_detected}",
+                    main_process_only=False,
                 )
                 accelerator.log(
                     {
@@ -407,7 +378,7 @@ def train(
                         "train_loss": train_loss,
                         "epoch": epoch,
                         "step": completed_steps,
-                        "spike": int(spike_detected),
+                        #"spike": int(spike_detected),
                     },
                     step=completed_steps,
                 )
@@ -420,10 +391,9 @@ def train(
                         for key, value in batches.items()
                     }
                 else:
-                    batches = batch                    
+                    batches = batch
 
                 if step % checkpointing_steps == 0:
-
                     if config_output_dir is not None:
                         # If spikes during the checkpointing_steps last steps,
                         # save the model and the batches of the last checkpointing_steps steps into a new checkpoint
@@ -431,7 +401,9 @@ def train(
                             if spike_detected:
                                 output_dir = f"step_{step-checkpointing_steps}"
                                 if config_output_dir is not None:
-                                    output_dir = os.path.join(config_output_dir, output_dir)
+                                    output_dir = os.path.join(
+                                        config_output_dir, output_dir
+                                    )
                                 accelerator.save_state(output_dir)
                                 for key, value in batches.items():
                                     output_name = f"{output_dir}/{str(key)}.pt"
@@ -447,11 +419,11 @@ def train(
                         # Reset no_spike
                         spike_detected = False
 
-                    #Partial evaluation after "checkpoint_steps" training steps
+                    # Partial evaluation after "checkpoint_steps" training steps
                     model.eval()
                     losses = []
                     print("train_dataloader length", len(train_dataloader))
-                    max_eval_steps = 10 #HARD CODED FOR NOW
+                    max_eval_steps = 10  # HARD CODED FOR NOW
                     for step, batch in enumerate(eval_dataloader):
                         if step == max_eval_steps:
                             break
@@ -461,7 +433,9 @@ def train(
 
                         loss = outputs.loss
                         losses.append(
-                            accelerator.gather_for_metrics(loss.repeat(per_device_eval_batch_size))
+                            accelerator.gather_for_metrics(
+                                loss.repeat(per_device_eval_batch_size)
+                            )
                         )
 
                     losses = torch.cat(losses)
@@ -473,7 +447,8 @@ def train(
 
                     logger.info(
                         f"epoch {epoch}: eval_perplexity: {eval_perplexity} eval_loss: {eval_loss}"
-                        f"train_loss: {train_loss} training_perplexity: {training_perplexity}"
+                        f"train_loss: {train_loss} training_perplexity: {training_perplexity}",
+                        main_process_only=False,
                     )
 
                     if with_tracking:
@@ -484,13 +459,15 @@ def train(
                                 "train_loss": train_loss,
                                 "training_perplexity": training_perplexity,
                                 "epoch": epoch,
-                                "step": completed_steps,
+                                #"step": completed_steps,
                             },
                             step=completed_steps,
                         )
+                    
+            del loss
+            del outputs
 
-
-        #Full evaluation after each epoch
+        # Full evaluation after each epoch
         model.eval()
         losses = []
         for step, batch in enumerate(eval_dataloader):
@@ -511,7 +488,8 @@ def train(
 
         logger.info(
             f"epoch {epoch}: eval_perplexity: {eval_perplexity} eval_loss: {eval_loss}"
-            f"train_loss: {train_loss} training_perplexity: {training_perplexity}"
+            f"train_loss: {train_loss} training_perplexity: {training_perplexity}",
+            main_process_only=False,
         )
 
         if with_tracking:
@@ -562,7 +540,13 @@ def train(
 
 
 def set_up_run(
-    logger, group_name, model_config, configs: Config, train_set, test_set, tokenizer_length
+    logger,
+    group_name,
+    model_config,
+    configs: Config,
+    train_set,
+    test_set,
+    tokenizer_length,
 ):
     # Rename the run
     repo = git.Repo(search_parent_directories=True)
@@ -609,18 +593,18 @@ def set_up_run(
     accelerator.wait_for_everyone()
 
     # Rewrite the model_config
-    #model_config.update(configs.model_config_overwrite)
+    # model_config.update(configs.model_config_overwrite)
 
     # Load a HuggingFace (pretrained) causal language model
 
     if configs.model_name and configs.pretrained_model:
-        logger.info("Training a pretrained model")
+        logger.info("Training a pretrained model", main_process_only=False)
         model = AutoModelForCausalLM.from_pretrained(
             configs.model_name,
             config=model_config,
         )
     else:
-        logger.info("Training new model from scratch")
+        logger.info("Training new model from scratch", main_process_only=False)
         model = AutoModelForCausalLM.from_config(
             model_config,
         )
@@ -668,7 +652,9 @@ def set_up_run(
         },
     ]
     optimizer = torch.optim.AdamW(
-        optimizer_grouped_parameters, lr=configs.learning_rate, betas=(configs.beta_1, configs.beta_2)
+        optimizer_grouped_parameters,
+        lr=configs.learning_rate,
+        betas=(configs.beta_1, configs.beta_2),
     )
 
     # Scheduler and math around the number of training steps.
